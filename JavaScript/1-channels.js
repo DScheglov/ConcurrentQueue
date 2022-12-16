@@ -2,16 +2,18 @@
 
 /**
  * @template R
- * @typedef {{
- *   (error: null | undefined, result: R): void;
- *   (error: unknown): void;
- * }} TaskCallback
+ * @typedef {(error: unknown, result?: R) => void} TaskCallback
  */
 
 /**
  * @typedef QueueOptions
  * @property {number} concurency - the max number of channels
  */
+
+/**
+ * @template {...any[]} Args
+ * @typedef {Array<(...args: Args) => void>} Listeners
+*/
 
 /**
  * @template T - type of task
@@ -234,6 +236,7 @@ class Queue {
     } else {
       this._notifySuccess(result, task);
     }
+
     this._notifyDone(error, result, task);
   }
 
