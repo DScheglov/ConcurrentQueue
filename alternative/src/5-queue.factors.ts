@@ -1,6 +1,6 @@
-import { addCallback, splitArgs } from "./common/callbacks";
-import { TimeoutError, withTimeout } from "./common/timeout";
-import type { AsyncCbFn, Callback } from "./common/types";
+import { addCallback, splitArgs } from './common/callbacks';
+import { TimeoutError, withTimeout } from './common/timeout';
+import type { AsyncCbFn, Callback, QueueStats } from './common/types';
 
 export { Callback, AsyncCbFn };
 
@@ -9,7 +9,8 @@ type Task<R> = {
   priority: number,
   expires: number | null,
   callback: Callback<R>;
-}
+  factor: any;
+};
 
 export type QueueOptions<Args extends any[]> = {
   concurrency?: number;
@@ -18,46 +19,63 @@ export type QueueOptions<Args extends any[]> = {
   waitingTimeout?: number;
   processTimeout?: number;
   getPriority?: (...args: Args) => number;
-}
+  getFactor?: (...args: Args) => any;
+};
 
-const byPriorityDesc = (itemA: { priority: number }, itemB: { priority: number }) => {
-  return itemB.priority - itemA.priority
-}
+const byPriorityDesc = (
+  itemA: { priority: number },
+  itemB: { priority: number },
+) => itemB.priority - itemA.priority;
 
 export const queue = <Args extends any[], R>(
   fn: AsyncCbFn<Args, R>,
-  {
+  options: QueueOptions<Args> = {},
+) => {
+  const {
     concurrency = 1,
     deferredStart = false,
-    paused = false,
     waitingTimeout,
     processTimeout,
-    getPriority 
-  }: QueueOptions<Args> = {}
-) => {
+    getPriority,
+    getFactor,
+  } = options;
+  let {
+    paused = false,
+  } = options;
   const isPrioritized = typeof getPriority === 'function';
-  const waiting: Array<Task<R>> = [];
+  const hasFactor = typeof getFactor === 'function';
+  const queues = new Map<any, Array<Task<R>>>();
+  const waiting: Array<Task<R>>[] = [];
   let running = 0;
 
   if (processTimeout) {
+    // eslint-disable-next-line no-param-reassign
     fn = withTimeout(fn, { timeout: processTimeout });
   }
 
-  const isExpired = ({ expires }: Task<R>, now: number = Date.now()) =>
-    (expires != null) && (expires < now);
+  const isExpired = ({ expires }: Task<R>, now: number = Date.now()) => (
+    expires != null && expires < now
+  );
 
   const extractNextTask = () => {
-    const task = waiting.shift();
-    
+    const tasks = waiting.shift();
+    if (tasks == null) return null;
+
+    const task = tasks.shift();
+
+    if (tasks.length > 0) {
+      waiting.push(tasks);
+    } else if (task != null) queues.delete(task.factor);
+
     if (task != null && isExpired(task)) {
       task.callback(
-        new TimeoutError(waitingTimeout!, `Waiting in queue(${fn.name})`)
+        new TimeoutError(waitingTimeout!, `Waiting in queue(${fn.name})`),
       );
-      return null
+      return null;
     }
 
     return task;
-  }
+  };
 
   const next = () => {
     if (running >= concurrency || waiting.length === 0 || paused) return;
@@ -70,23 +88,30 @@ export const queue = <Args extends any[], R>(
     }
 
     task.run();
-  }
+  };
 
-  const start = () => deferredStart ? setTimeout(next, 0) : next();
+  const start = () => (deferredStart ? setTimeout(next, 0) : next());
 
   const addTask = (task: Task<R>) => {
-    waiting.push(task);
-    if (isPrioritized) waiting.sort(byPriorityDesc)
+    const tasks = queues.get(task.factor) ?? [];
+    tasks.push(task);
+    tasks.sort(byPriorityDesc);
+
+    if (!queues.has(task.factor)) {
+      queues.set(task.factor, tasks);
+      waiting.push(tasks);
+    }
+
     start();
-  }
+  };
 
   const queueFn = (...args: [...Args, Callback<R>]) => {
     const [justArgs, callback] = splitArgs(args);
 
     const run = () => {
-      running++;
+      running += 1;
       fn(...addCallback(justArgs, (error: unknown, result?: R) => {
-        running--;
+        running -= 1;
         callback(error, result);
         next();
       }));
@@ -96,22 +121,26 @@ export const queue = <Args extends any[], R>(
 
     const expires = waitingTimeout != null ? Date.now() + waitingTimeout : null;
 
-    addTask({ run, priority, expires, callback });
-  }
+    const factor = hasFactor ? getFactor(...justArgs) : 0;
+
+    addTask({
+      run, priority, expires, callback, factor,
+    });
+  };
 
   queueFn.pause = () => {
     paused = true;
-  }
+  };
 
   queueFn.resume = () => {
     if (!paused) return;
     paused = false;
     start();
-  }
- 
-  queueFn.stats = () => ({
+  };
+
+  queueFn.stats = (): QueueStats => ({
     running,
-    waiting: waiting.length,
+    waiting: waiting.reduce((total, tasks) => total + tasks.length, 0),
     concurrency,
     get isDrain() {
       return this.running === 0 && this.waiting === 0;
@@ -119,4 +148,4 @@ export const queue = <Args extends any[], R>(
   });
 
   return queueFn;
-}
+};

@@ -1,24 +1,25 @@
-import { addCallback, splitArgs } from "./common/callbacks";
-import type { AsyncCbFn, Callback } from "./common/types";
+import { addCallback, splitArgs } from './common/callbacks';
+import type { AsyncCbFn, Callback, QueueStats } from './common/types';
 
 export { Callback, AsyncCbFn };
 
 type Task = {
   run: () => void,
-}
+};
 
 export type QueueOptions = {
   concurrency?: number;
   deferredStart?: boolean;
-}
+};
 
 export const queue = <Args extends any[], R>(
   fn: AsyncCbFn<Args, R>,
-  { 
-    concurrency = 1, 
-    deferredStart = false,
-  }: QueueOptions = {}
+  options: QueueOptions = {},
 ) => {
+  const {
+    concurrency = 1,
+    deferredStart = false,
+  } = options;
   const waiting: Array<Task> = [];
   let running = 0;
 
@@ -35,31 +36,31 @@ export const queue = <Args extends any[], R>(
     }
 
     task.run();
-  }
+  };
 
-  const start = () => deferredStart ? setTimeout(next, 0) : next();
+  const start = () => (deferredStart ? setTimeout(next, 0) : next());
 
   const addTask = (task: Task) => {
     waiting.push(task);
     start();
-  }
+  };
 
   const queueFn = (...args: [...Args, Callback<R>]) => {
     const [justArgs, callback] = splitArgs(args);
 
     const run = () => {
-      running++;
+      running += 1;
       fn(...addCallback(justArgs, (error: unknown, result?: R) => {
-        running--;
+        running -= 1;
         callback(error, result);
         next();
       }));
     };
 
     addTask({ run });
-  }
+  };
 
-  queueFn.stats = () => ({
+  queueFn.stats = (): QueueStats => ({
     running,
     waiting: waiting.length,
     concurrency,
@@ -69,4 +70,4 @@ export const queue = <Args extends any[], R>(
   });
 
   return queueFn;
-}
+};

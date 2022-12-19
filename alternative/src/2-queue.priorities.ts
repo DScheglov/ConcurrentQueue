@@ -1,33 +1,33 @@
-import { addCallback, splitArgs } from "./common/callbacks";
-import type { AsyncCbFn, Callback } from "./common/types";
+import { addCallback, splitArgs } from './common/callbacks';
+import type { AsyncCbFn, Callback, QueueStats } from './common/types';
 
 export { Callback, AsyncCbFn };
 
 type Task = {
   run: () => void,
   priority: number
-}
+};
 
 export type QueueOptions<Args extends any[]> = {
   concurrency?: number;
   deferredStart?: boolean;
-  paused?: boolean;
   getPriority?: (...args: Args) => number;
-}
+};
 
-const byPriorityDesc = (itemA: { priority: number }, itemB: { priority: number }) => {
-  return itemB.priority - itemA.priority
-}
+const byPriorityDesc = (
+  itemA: { priority: number },
+  itemB: { priority: number },
+) => itemB.priority - itemA.priority;
 
 export const queue = <Args extends any[], R>(
   fn: AsyncCbFn<Args, R>,
-  {
+  options: QueueOptions<Args> = {},
+) => {
+  const {
     concurrency = 1,
     deferredStart = false,
-    paused = false,
     getPriority,
-  }: QueueOptions<Args> = {}
-) => {
+  } = options;
   const isPrioritized = typeof getPriority === 'function';
   const waiting: Array<Task> = [];
   let running = 0;
@@ -35,7 +35,7 @@ export const queue = <Args extends any[], R>(
   const extractNextTask = () => waiting.shift();
 
   const next = () => {
-    if (running >= concurrency || waiting.length === 0 || paused) return;
+    if (running >= concurrency || waiting.length === 0) return;
 
     const task = extractNextTask();
 
@@ -45,23 +45,23 @@ export const queue = <Args extends any[], R>(
     }
 
     task.run();
-  }
+  };
 
-  const start = () => deferredStart ? setTimeout(next, 0) : next();
+  const start = () => (deferredStart ? setTimeout(next, 0) : next());
 
   const addTask = (task: Task) => {
     waiting.push(task);
-    if (isPrioritized) waiting.sort(byPriorityDesc)
+    if (isPrioritized) waiting.sort(byPriorityDesc);
     start();
-  }
+  };
 
   const queueFn = (...args: [...Args, Callback<R>]) => {
     const [justArgs, callback] = splitArgs(args);
 
     const run = () => {
-      running++;
+      running += 1;
       fn(...addCallback(justArgs, (error: unknown, result?: R) => {
-        running--;
+        running -= 1;
         callback(error, result);
         next();
       }));
@@ -70,19 +70,9 @@ export const queue = <Args extends any[], R>(
     const priority = isPrioritized ? getPriority(...justArgs) : 0;
 
     addTask({ run, priority });
-  }
+  };
 
-  queueFn.pause = () => {
-    paused = true;
-  }
-
-  queueFn.resume = () => {
-    if (!paused) return;
-    paused = false;
-    start();
-  }
- 
-  queueFn.stats = () => ({
+  queueFn.stats = (): QueueStats => ({
     running,
     waiting: waiting.length,
     concurrency,
@@ -92,4 +82,4 @@ export const queue = <Args extends any[], R>(
   });
 
   return queueFn;
-}
+};

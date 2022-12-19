@@ -1,21 +1,21 @@
-import { addCallback, splitArgs } from "./callbacks";
-import type { AsyncCbFn, Callback } from "./types";
+import { addCallback, splitArgs } from './callbacks';
+import type { AsyncCbFn, Callback } from './types';
 
 type TimeoutErrorConstructor = {
   new(timeout: number, processName?: string): Error;
-}
+};
 
 type TimeoutOptions = {
   timeout: number,
   timeoutError?: TimeoutErrorConstructor
-}
+};
 
 export class TimeoutError extends Error {
-  name = "TimeoutEror"
+  name = 'TimeoutEror';
 
   constructor(
-    public readonly timeout: number, 
-    processName: string = "anonymous function"
+    public readonly timeout: number,
+    processName: string = 'anonymous function',
   ) {
     super(`${processName} takes longer then ${timeout}ms.`);
   }
@@ -41,11 +41,11 @@ export const timeout = <Args extends any[], R>(
     if (timerId == null) return;
     clearTimeout(timerId);
     timerId = null;
-    callback(error, result)
+    callback(error, result);
   }));
 };
 
-export const withTimeout =  <Args extends any[], R>(
+export const withTimeout = <Args extends any[], R>(
   fn: AsyncCbFn<Args, R>,
-  options: TimeoutOptions
+  options: TimeoutOptions,
 ) => (...args: [...Args, Callback<R>]) => timeout(fn, options, ...args);
